@@ -1,0 +1,327 @@
+/*1) Import the dataset and do usual exploratory analysis steps like checking the 
+structure & characteristics of the dataset.*/
+
+/* Data types ofcolumns of all the tables is checked*/
+
+/* Time period for which data is given*/
+
+select
+min(Date) as first_order_date,
+max(Date) as latest_order_date
+From
+(select order_purchase_timestamp,
+extract(date FROM order_purchase_timestamp) as Date
+from `Target_Business_Case.orders`) as Table_1;
+
+/* Cities and States of customers ordered during this time period*/
+
+SELECT
+distinct customer_city, customer_state
+FROM `Target_Business_Case.customers`
+order by 2
+limit 10;
+
+/*2) In-depth Exploration:
+a) Is there a growing trend of e-commerce in Brazil? How can we describe a complete 
+scenario? Can we see some seasonality with peaks at specific months?*/
+
+Select
+distinct order_month, order_year,
+count(order_id) over(partition by order_year,order_month) as tot_orders
+FROM
+(select *,
+extract(year from order_purchase_timestamp) as order_year,
+extract(month from order_purchase_timestamp) as order_month
+from `Target_Business_Case.orders` ) as tab1
+order by 2,1
+limit 10; 
+
+/*b) At what time Brazilian customers tend to buy (Dawn, Morning, Afternoon or Night)?*/
+
+SELECT distinct time_of_day,
+count(order_id) over(partition by time_of_day) as tot_orders
+from
+(SELECT *,
+case
+ when time between '00:00:00' and '06:00:00'
+ then 'Dawn'
+ when time between '06:00:01' and '12:00:00'
+ then 'Morning'
+ when time between '12:00:01' and '18:00:00'
+ then 'Afternoon'
+ else 'Night'
+end as time_of_day
+from 
+(select *,
+extract(time from order_purchase_timestamp) as time
+from `Target_Business_Case.orders`)
+) as Table_1
+order by tot_orders desc;
+
+/* 3) Evolution of E-commerce orders in the Brazil region:
+a) Get month on month orders by states*/
+
+select
+distinct customer_state,year,month,
+count(order_id) over(partition by customer_state,year,month) as tot_orders
+from
+(select
+c.customer_state,o.order_id,
+extract(year from o.order_purchase_timestamp) as year, extract(month from o.order_purchas
+e_timestamp) as month,
+from `Target_Business_Case.orders` as o
+join `Target_Business_Case.customers` as c
+on o.customer_id = c.customer_id) as Table1
+order by customer_state, year,month
+order by tot_orders desc 
+limit 10; 
+
+/* b) Distribution of customers across the states*/
+
+Select
+distinct customer_state, tot_state_customer,Table1.tot_customers,
+round((Table1.tot_state_customer/Table1.tot_customers)*100,2) as percent_customer_in_state
+from
+(SELECT *,
+count(distinct customer_unique_id) over() as tot_customers,
+count(distinct customer_unique_id) over(partition by customer_state) as tot_state_customer
+from `Target_Business_Case.customers`) as Table1
+order by 2 desc,1
+
+/*) Impact on Economy: Analyze the money movement by e-commerce by looking at order prices, freight and others.
+a) Get % increase in cost of orders from 2017 to 2018 (include months between Jan to Aug only) */
+
+SELECT *,
+round(((next_year_revenue - yearly_revenue) / yearly_revenue) * 100, 2)
+as percentage_change
+from
+(select Tab2.year,yearly_revenue,
+lead(yearly_revenue) over(order by yearly_revenue) as next_year_revenue,
+from
+(select
+distinct Tab1.year,
+sum(payment_value) over(partition by Tab1.year) as yearly_revenue,
+From
+(select
+distinct o.order_id,o.order_purchase_timestamp, p.payment_value,
+extract(year from o.order_purchase_timestamp) as year
+from `Target_Business_Case.orders` as o
+join `Target_Business_Case.payments` as p
+on o.order_id=p.order_id
+where o.order_purchase_timestamp between '2017-01-01' and '2017-08-31'
+or o.order_purchase_timestamp between '2018-01-01' and '2018-08-31')
+as Tab1) as Tab2) as Tab3
+order by Tab3.year;
+
+
+/*b) Mean & Sum of price and freight value by customer state.*/
+
+select
+distinct c.customer_state as state,
+round(sum(op.price) over(partition by c.customer_state),2) as tot_price,
+round(avg(op.price) over(partition by c.customer_state),2) as mean_price,
+round(sum(op.freight_value) over(partition by c.customer_state),2) as tot_freight,
+round(avg(op.freight_value) over(partition by c.customer_state),2) as mean_freight
+from `Target_Business_Case.customers` as c
+join `Target_Business_Case.orders` as o
+on c.customer_id=o.customer_id
+join `Target_Business_Case.order_items` as op
+on o.order_id=op.order_id
+order by 2 desc,3 desc,4 desc,5 desc,1;
+
+/*5) Analysis on sales, freight and delivery time
+a) Calculate days between purchasing, delivering and estimated delivery.*/
+
+select order_purchase_timestamp as order_date,
+order_delivered_customer_date as delivery_date,
+order_estimated_delivery_date,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as delivery_purch
+ase_datediff,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as dilevery_est
+imatedDate_datediff,
+date_diff(order_estimated_delivery_date,order_purchase_timestamp,day) as estimated_purch
+se_datediff
+from
+`Target_Business_Case.orders`;
+
+/*b) Find time_to_delivery & diff_estimated_delivery. Formula for the same given below:
+• time_to_delivery = order_purchase_timestamp-order_delivered_customer_date
+• diff_estimated_delivery = order_estimated_delivery_date_order_delivered_customer_date*/
+
+select order_purchase_timestamp,order_delivered_customer_date,
+order_estimated_delivery_date,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_del
+ivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_esti
+mated_delivery
+from
+`Target_Business_Case.orders`
+
+/*c) Group data by state, take mean of freight_value, time_to_delivery, 
+diff_estimated_delivery.*/
+
+select
+distinct c.customer_state as state,
+round(avg(o.freight_value) over(partition by c.customer_state),2) as mean_freight_value,
+round(avg(tab1.time_to_delivery) over(partition by c.customer_state),2) as mean_time_to_delivery,
+round(avg(tab1.diff_estimated_delivery) over(partition by c.customer_state),2) as mean_diff_estimated_delivery
+from `Target_Business_Case.customers` as c
+join
+(select *,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_delivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_estimated_delivery,
+from
+`Target_Business_Case.orders`) as tab1
+on c.customer_id = tab1.customer_id
+join
+`Target_Business_Case.order_items` as o
+on tab1.order_id=o.order_id
+
+/*d) Sort the data to get the following:
+o Top 5 states with highest/lowest average freight value - sort in desc/asc limit 5*/
+
+select
+distinct c.customer_state as state,
+round(avg(o.freight_value) over(partition by c.customer_state),2) as mean_freight_value,
+round(avg(tab1.time_to_delivery) over(partition by c.customer_state),2) as mean_time_to_delivery,
+round(avg(tab1.diff_estimated_delivery) over(partition by c.customer_state),2) as mean_diff_estimated_delivery
+from `Target_Business_Case.customers` as c
+join
+(select *,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_delivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_estimated_delivery,
+from
+`Target_Business_Case.orders`) as tab1
+on c.customer_id = tab1.customer_id
+join
+`Target_Business_Case.order_items` as o
+on tab1.order_id=o.order_id
+order by mean_freight_value desc
+limit 5
+
+/* b) Top 5 lowest average freight value*/
+
+select
+distinct c.customer_state as state,
+round(avg(o.freight_value) over(partition by c.customer_state),2) as mean_freight_value,
+round(avg(tab1.time_to_delivery) over(partition by c.customer_state),2) as mean_time_to_delivery,
+round(avg(tab1.diff_estimated_delivery) over(partition by c.customer_state),2) as mean_diff_estimated_delivery
+from `Target_Business_Case.customers` as c
+join
+(select *,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_delivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_estimated_delivery,
+from
+`Target_Business_Case.orders`) as tab1
+on c.customer_id = tab1.customer_id
+join
+`Target_Business_Case.order_items` as o
+on tab1.order_id=o.order_id
+order by mean_freight_value
+limit 5
+
+/* o Top 5 states with highest/lowest average time to delivery*/
+
+select
+distinct c.customer_state as state,
+round(avg(o.freight_value) over(partition by c.customer_state),2) as mean_freight_value,
+round(avg(tab1.time_to_delivery) over(partition by c.customer_state),2) as mean_time_to_delivery,
+round(avg(tab1.diff_estimated_delivery) over(partition by c.customer_state),2) as mean_diff_estimated_delivery
+from `Target_Business_Case.customers` as c
+join
+(select *,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_delivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_estimated_delivery,
+from
+`Target_Business_Case.orders`) as tab1
+on c.customer_id = tab1.customer_id
+join
+`Target_Business_Case.order_items` as o
+on tab1.order_id=o.order_id
+order by mean_time_to_delivery desc
+limit 5
+
+/*b) Top 5 states with lowest average time to delivery.*/
+
+select
+distinct c.customer_state as state,
+round(avg(o.freight_value) over(partition by c.customer_state),2) as mean_freight_value,
+round(avg(tab1.time_to_delivery) over(partition by c.customer_state),2) as mean_time_to_delivery,
+round(avg(tab1.diff_estimated_delivery) over(partition by c.customer_state),2) as mean_diff_estimated_delivery
+from `Target_Business_Case.customers` as c
+join
+(select *,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_delivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_estimated_delivery,
+from
+`Target_Business_Case.orders`) as tab1
+on c.customer_id = tab1.customer_id
+join
+`Target_Business_Case.order_items` as o
+on tab1.order_id=o.order_id
+order by mean_time_to_delivery
+limit 5
+
+/* Top 5 states where delivery is really fast/ not so fast compared to estimated date.*/
+
+select
+distinct c.customer_state as state,
+round(avg(o.freight_value) over(partition by c.customer_state),2) as mean_freight_value,
+round(avg(tab1.time_to_delivery) over(partition by c.customer_state),2) as mean_time_to_delivery,
+round(avg(tab1.diff_estimated_delivery) over(partition by c.customer_state),2) as mean_diff_estimated_delivery
+from `Target_Business_Case.customers` as c
+join
+(select *,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_delivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_estimated_delivery,
+from
+`Target_Business_Case.orders`) as tab1
+on c.customer_id = tab1.customer_id
+join
+`Target_Business_Case.order_items` as o
+on tab1.order_id=o.order_id
+order by mean_diff_estimated_delivery desc
+limit 5
+
+/* b) Slow delivery:*/
+
+select
+distinct c.customer_state as state,
+round(avg(o.freight_value) over(partition by c.customer_state),2) as mean_freight_value,
+round(avg(tab1.time_to_delivery) over(partition by c.customer_state),2) as mean_time_to_delivery,
+round(avg(tab1.diff_estimated_delivery) over(partition by c.customer_state),2) as mean_diff_estimated_delivery
+from `Target_Business_Case.customers` as c
+join
+(select *,
+date_diff(order_delivered_customer_date,order_purchase_timestamp,day) as time_to_delivery,
+date_diff(order_estimated_delivery_date,order_delivered_customer_date,day) as diff_estimated_delivery,
+from
+`Target_Business_Case.orders`) as tab1
+on c.customer_id = tab1.customer_id
+join
+`Target_Business_Case.order_items` as o
+on tab1.order_id=o.order_id
+order by mean_diff_estimated_delivery
+limit 5
+
+/* 6) Payment type analysis:
+a) Month over Month count of orders for different payment types.*/
+
+select distinct tab1.month,tab1.year,tab1.payment_type,
+count(tab1.order_id) over(partition by tab1.payment_type,tab1.year,tab1.month)
+as count_of_payment_type
+from
+(select o.order_id,
+extract(year from order_purchase_timestamp) as year,
+extract(month from order_purchase_timestamp) as month,p.payment_type
+from `Target_Business_Case.orders` as o
+join `Target_Business_Case.payments` as p
+on o.order_id=p.order_id)as tab1
+order by 2,1,4 desc;
+
+/*b) Count of orders based on the no. of payment installments.*/
+
+Select distinct payment_installments,
+count(order_id) over(partition by payment_installments) as count_as_per_installments_no
+from `Target_Business_Case.payments`
+order by 1
